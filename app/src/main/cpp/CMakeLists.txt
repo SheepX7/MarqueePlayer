@@ -10,18 +10,20 @@ cmake_minimum_required(VERSION 3.10.2)
 project("marqueeplayer")
 include_directories(.)
 include_directories(include/ffmpeg)
-aux_source_directory(marquee_player PLAYER)
+aux_source_directory(marquee_player  PLAYER)
+aux_source_directory(marquee_player/sdl PLAYER_SDL)
+
 
 add_library( # Sets the name of the library.
              native-lib
              SHARED
              native-lib.cpp
              ${PLAYER}
+             ${PLAYER_SDL}
         )
 
 find_library( # Sets the name of the path variable.
               log-lib
-
               # Specifies the name of the NDK library that
               # you want CMake to locate.
               log )
@@ -35,4 +37,4 @@ target_link_libraries( # Specifies the target library.
 
                        # Links the target library to the log library
                        # included in the NDK.
-                       ${log-lib} )
+                       ${log-lib})
