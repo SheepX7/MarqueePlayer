@@ -6,6 +6,6 @@ namespace uranus {
 
         };
 
-        static const char *SDL_GetError();
+        const char *SDL_GetError();
     }
 }

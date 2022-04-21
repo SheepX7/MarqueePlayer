@@ -12,7 +12,7 @@ namespace uranus {
             char *name;
         };
 
-        static SDL_Thread* SDL_CreateThread(SDL_Thread *thread, int (*fn)(void*), void *data, const char *name);
+        SDL_Thread* SDL_CreateThread(SDL_Thread *thread, int (*fn)(void*), void *data, const char *name);
     }
 }
 

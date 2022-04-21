@@ -1,13 +1,25 @@
-#include "libavfilter/avfilter.h"
-#include "sdl/marquee_sdl.h"
 #include <string>
 #include <stdlib.h>
+extern "C" {
 #include <libavcodec/avfft.h>
+#include "libavcodec/packet.h"
+#include "libavutil/frame.h"
+#include "libavcodec/avcodec.h"
+#include "libavformat/avformat.h"
+#include "libavfilter/avfilter.h"
+#include <libavformat/avformat.h>
+#include "libavutil/time.h"
+#include "libavutil/avstring.h"
+#include "libavcodec/avcodec.h"
+}
 #include "sdl/sdl_thread.h"
+#include "sdl/sdl_mutex.h"
+#include "sdl/marquee_sdl.h"
+
+
 
 #define FRAME_QUEUE_SIZE 16
 #define SAMPLE_ARRAY_SIZE (8 * 65536)
-using namespace uranus::sdl::mutex;
 using namespace uranus::sdl;
 
 namespace uranus {
@@ -235,6 +247,7 @@ namespace uranus {
 
             const char* wanted_stream_spec[AVMEDIA_TYPE_NB] = {0};
 
+            bool fast;
         };
 
         class MarqueePlayer {

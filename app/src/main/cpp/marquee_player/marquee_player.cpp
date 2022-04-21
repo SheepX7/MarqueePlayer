@@ -1,10 +1,5 @@
-#include <libavformat/avformat.h>
-#include <libavutil/time.h>
-#include "sdl/sdl_mutex.h"
-#include "libavutil/avstring.h"
 #include "marquee_player.h"
-#include "libavcodec/avcodec.h"
-#include "ff_cmdutils.h"
+#include "cmdutils.h"
 
 #define VIDEO_PICTURE_QUEUE_SIZE 3
 #define SUBPICTURE_QUEUE_SIZE 16
@@ -48,42 +43,38 @@ static int packet_queue_init(PacketQueue *q) {
     return 0;
 }
 
-static void set_clock_at(Clock *c, double pts, int serial, double time)
-{
+static void set_clock_at(Clock *c, double pts, int serial, double time) {
     c->pts = pts;
     c->last_updated = time;
     c->pts_drift = c->pts - time;
     c->serial = serial;
 }
 
-static void set_clock(Clock *c, double pts, int serial)
-{
+static void set_clock(Clock *c, double pts, int serial) {
     double time = av_gettime_relative() / 1000000.0;
     set_clock_at(c, pts, serial, time);
 }
 
-static void init_clock(Clock *c, int *queue_serial)
-{
+static void init_clock(Clock *c, int *queue_serial) {
     c->speed = 1.0;
     c->paused = 0;
     c->queue_serial = queue_serial;
     set_clock(c, NAN, -1);
 }
 
-static int decode_interrupt_cb(void* arg) {
-
+static int decode_interrupt_cb(void *arg) {
+    return 1;
 }
 
-static int is_realtime(AVFormatContext *s)
-{
-    if(   !strcmp(s->iformat->name, "rtp")
-          || !strcmp(s->iformat->name, "rtsp")
-          || !strcmp(s->iformat->name, "sdp")
+static int is_realtime(AVFormatContext *s) {
+    if (!strcmp(s->iformat->name, "rtp")
+        || !strcmp(s->iformat->name, "rtsp")
+        || !strcmp(s->iformat->name, "sdp")
             )
         return 1;
 
-    if(s->pb && (   !strncmp(s->url, "rtp:", 4)
-                    || !strncmp(s->url, "udp:", 4)
+    if (s->pb && (!strncmp(s->url, "rtp:", 4)
+                  || !strncmp(s->url, "udp:", 4)
     )
             )
         return 1;
@@ -104,12 +95,123 @@ void FFPlayer::set_default_window_size(int width, int height, AVRational sar)
 }
 #endif
 
-static int stream_component_open(VideoState *pState, int i) {
-
+static int audio_open(void *opaque, int64_t wanted_channel_layout, int wanted_nb_channels,
+                      int wanted_sample_rate, struct AudioParams *audio_hw_params) {
+    return false;
 }
 
+/** open a given stream. Return 0 if OK **/
+static int stream_component_open(FFPlayer *ffp, int stream_index) {
+    VideoState *is = ffp->is;
+    AVFormatContext *ic = is->ic;
+    AVCodecContext *avctx;
+    AVCodec *codec;
+    const char *forced_codec_name = NULL;
+    int ret = 0;
+    int stream_lowres = 0;
+    AVDictionary *opts = NULL;
+    AVDictionaryEntry *t = NULL;
+    int sample_rate, nb_channels;
+    uint64_t channel_layout;
+
+    if (stream_index < 0 || stream_index >= ic->nb_streams)
+        return -1;
+
+    avctx = avcodec_alloc_context3(NULL);
+    if (!avctx)
+        return AVERROR(ENOMEM);
+
+    ret = avcodec_parameters_to_context(avctx, ic->streams[stream_index]->codecpar);
+    if (ret < 0)
+        goto fail;
+
+    avctx->pkt_timebase = ic->streams[stream_index]->time_base;
+
+    codec = avcodec_find_decoder(avctx->codec_id);
+
+    switch (avctx->codec_type) {
+        case AVMEDIA_TYPE_AUDIO:
+            is->last_audio_stream = stream_index;
+            break;
+        case AVMEDIA_TYPE_VIDEO:
+            is->last_video_stream = stream_index;
+            break;
+        case AVMEDIA_TYPE_SUBTITLE:
+            is->last_subtitle_stream = stream_index;
+            break;
+    }
+
+    if (forced_codec_name)
+        codec = avcodec_find_decoder_by_name(forced_codec_name);
+
+    if (!codec) {
+        if (forced_codec_name)
+            av_log(NULL, AV_LOG_WARNING,
+                   "No codec could be found with name '%s'\n", forced_codec_name);
+        else
+            av_log(NULL, AV_LOG_WARNING,
+                   "No decoder could be found for codec %s\n", avcodec_get_name(avctx->codec_id));
+        ret = AVERROR(EINVAL);
+        goto fail;
+    }
+
+    avctx->codec_id = codec->id;
+    if (stream_lowres < codec->max_lowres) {
+        av_log(avctx, AV_LOG_WARNING,
+               "The maximum value for lowres supported by the decoder is %d\n",
+               codec->max_lowres);
+        stream_lowres = codec->max_lowres;
+    }
+    avctx->lowres = stream_lowres;
+
+
+    if (ffp->fast)
+        avctx->flags2 |= AV_CODEC_FLAG2_FAST;
+
+    opts = filter_codec_opts(ffp->codec_opts, avctx->codec_id, ic, ic->streams[stream_index],
+                             codec);
+    if ((ret = avcodec_open2(avctx, codec, &opts)) < 0) {
+        goto fail;
+    }
+
+    if ((t = av_dict_get(opts, "", NULL, AV_DICT_IGNORE_SUFFIX))) {
+        av_log(NULL, AV_LOG_ERROR, "Option %s not found.\n", t->key);
+        ret = AVERROR_OPTION_NOT_FOUND;
+        goto fail;
+    }
+
+    is->eof = 0;
+    ic->streams[stream_index]->discard = AVDISCARD_DEFAULT;
+    switch (avctx->codec_type) {
+        case AVMEDIA_TYPE_AUDIO:
+#ifdef CONFIG_AVFILTER
+#else
+            sample_rate = avctx->sample_rate;
+            nb_channels = avctx->channels;
+            channel_layout = avctx->channel_layout;
+#endif
+            if ((ret = audio_open(is, channel_layout, nb_channels, sample_rate, NULL)) < 0) {
+                goto fail;
+            }
+            decoder_init()
+
+            break;
+    }
+
+    fail:
+    avcodec_free_context(&avctx);
+    return ret;
+}
+
+/**
+ * 1。Alloc 封装格式上下文 （avformat_alloc_context）, 通过 avformat_open_input 打开媒体流文件
+ * 2. 查找流信息，avformat_find_stream_info
+ * 3. 按类型打开对应的流
+ * @param arg
+ * @return
+ */
 static int read_thread(void *arg) {
-    FFPlayer* ffp = (FFPlayer*) arg;
+    FFPlayer *ffp = (FFPlayer *) arg;
     VideoState *is = ffp->is;
 
     AVFormatContext *ic;
@@ -154,7 +256,7 @@ static int read_thread(void *arg) {
     av_format_inject_global_side_data(ic);
 
     if (ffp->find_stream_info) {
-        AVDictionary **opts = setup_find_stream_info_opts(ic, codec_opts);
+        AVDictionary **opts = /*setup_find_stream_info_opts(ic, codec_opts)*/NULL;
         int origin_nb_streams = ic->nb_streams;
 
         err = avformat_find_stream_info(ic, opts);
@@ -174,7 +276,8 @@ static int read_thread(void *arg) {
         ic->pb->eof_reached = 0;
 
     if (ffp->seek_by_bytes < 0)
-        ffp->seek_by_bytes = !!(ic->iformat->flags & AVFMT_TS_DISCONT) && strcmp("ogg", ic->iformat->name);
+        ffp->seek_by_bytes =
+                !!(ic->iformat->flags & AVFMT_TS_DISCONT) && strcmp("ogg", ic->iformat->name);
 
     is->max_frame_duration = (ic->iformat->flags & AVFMT_TS_DISCONT) ? 10.0 : 3600.0;
 
@@ -192,7 +295,7 @@ static int read_thread(void *arg) {
         ret = avformat_seek_file(ic, -1, INT64_MIN, timestamp, INT64_MAX, 0);
         if (ret < 0) {
             av_log(NULL, AV_LOG_WARNING, "%s: could not seek to position %0.3f\n",
-                   is->filename, (double)timestamp / AV_TIME_BASE);
+                   is->filename, (double) timestamp / AV_TIME_BASE);
         }
     }
 
@@ -214,25 +317,28 @@ static int read_thread(void *arg) {
     for (int i = 0; i < AVMEDIA_TYPE_NB; i++) {
         if (ffp->wanted_stream_spec[i] && st_index[i] == -1) {
             av_log(NULL, AV_LOG_ERROR, "Stream specifier %s does not match any %s stream\n",
-                    ffp->wanted_stream_spec[i], av_get_media_type_string(i));
+                   ffp->wanted_stream_spec[i], av_get_media_type_string(
+                            static_cast<AVMediaType>(i)));
             st_index[i] = INT_MAX;
         }
     }
 
     if (!ffp->video_disable)
         st_index[AVMEDIA_TYPE_VIDEO] =
-                av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, st_index[AVMEDIA_TYPE_VIDEO], -1, NULL, 0);
+                av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, st_index[AVMEDIA_TYPE_VIDEO], -1, NULL,
+                                    0);
 
     if (!ffp->audio_disable)
         st_index[AVMEDIA_TYPE_AUDIO] =
                 av_find_best_stream(ic, AVMEDIA_TYPE_AUDIO, st_index[AVMEDIA_TYPE_AUDIO],
-                        st_index[AVMEDIA_TYPE_VIDEO], NULL, 0);
+                                    st_index[AVMEDIA_TYPE_VIDEO], NULL, 0);
 
     if (!ffp->subtitle_disable)
         st_index[AVMEDIA_TYPE_SUBTITLE] =
                 av_find_best_stream(ic, AVMEDIA_TYPE_SUBTITLE, st_index[AVMEDIA_TYPE_SUBTITLE],
-                        st_index[AVMEDIA_TYPE_AUDIO] > 0 ? st_index[AVMEDIA_TYPE_AUDIO] : st_index[AVMEDIA_TYPE_VIDEO],
-                        NULL, 0);
+                                    st_index[AVMEDIA_TYPE_AUDIO] > 0 ? st_index[AVMEDIA_TYPE_AUDIO]
+                                                                     : st_index[AVMEDIA_TYPE_VIDEO],
+                                    NULL, 0);
 
     is->show_mode = ffp->show_mode;
 
@@ -248,21 +354,21 @@ static int read_thread(void *arg) {
 
     /* open the streams */
     if (st_index[AVMEDIA_TYPE_AUDIO] >= 0) {
-        stream_component_open(is, st_index[AVMEDIA_TYPE_AUDIO]);
+        stream_component_open(ffp, st_index[AVMEDIA_TYPE_AUDIO]);
     } else {
         ffp->av_sync_type = AV_SYNC_VIDEO_MASTER;
-        is->av_sync_type  = ffp->av_sync_type;
+        is->av_sync_type = ffp->av_sync_type;
     }
 
     ret = -1;
     if (st_index[AVMEDIA_TYPE_VIDEO] >= 0) {
-        ret = stream_component_open(is, st_index[AVMEDIA_TYPE_VIDEO]);
+        ret = stream_component_open(ffp, st_index[AVMEDIA_TYPE_VIDEO]);
     }
     if (is->show_mode == VideoState::SHOW_MODE_NONE)
         is->show_mode = ret >= 0 ? VideoState::SHOW_MODE_VIDEO : VideoState::SHOW_MODE_RDFT;
 
     if (st_index[AVMEDIA_TYPE_SUBTITLE] >= 0) {
-        stream_component_open(is, st_index[AVMEDIA_TYPE_SUBTITLE]);
+        stream_component_open(ffp, st_index[AVMEDIA_TYPE_SUBTITLE]);
     }
 
     if (is->video_stream < 0 && is->audio_stream < 0) {
@@ -284,11 +390,10 @@ static int read_thread(void *arg) {
     return 0;
 }
 
-static void stream_close(VideoState *is)
-{
+static void stream_close(VideoState *is) {
 }
 
-VideoState* FFPlayer::stream_open(const char *filename, AVInputFormat *iformat) {
+VideoState *FFPlayer::stream_open(const char *filename, AVInputFormat *iformat) {
     is = new VideoState();
     if (!is)
         return nullptr;
@@ -299,8 +404,8 @@ VideoState* FFPlayer::stream_open(const char *filename, AVInputFormat *iformat) 
     if (!is->filename)
         goto fail;
     is->iformat = iformat;
-    is->ytop    = 0;
-    is->xleft   = 0;
+    is->ytop = 0;
+    is->xleft = 0;
     /* start video display */
     if (frame_queue_init(&is->pictq, &is->videoq, VIDEO_PICTURE_QUEUE_SIZE, 1) < 0)
         goto fail;
@@ -332,10 +437,10 @@ VideoState* FFPlayer::stream_open(const char *filename, AVInputFormat *iformat) 
     is->audio_volume = startup_volume;
     is->muted = 0;
     is->av_sync_type = av_sync_type;
-    is->read_tid     = SDL_CreateThread(is->_read_tid, read_thread, this, "read_thread");
+    is->read_tid = SDL_CreateThread(is->_read_tid, read_thread, this, "read_thread");
     if (!is->read_tid) {
         av_log(NULL, AV_LOG_FATAL, "SDL_CreateThread(): %s\n", SDL_GetError());
-fail:
+        fail:
         stream_close(is);
         return NULL;
     }
