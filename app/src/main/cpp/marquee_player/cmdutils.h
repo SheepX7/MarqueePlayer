@@ -4,5 +4,5 @@
 
 AVDictionary *filter_codec_opts(AVDictionary *codec_opts, AVCodecID id, AVFormatContext *pContext,
                                 AVStream *pStream, AVCodec *pCodec) {
-
+    return nullptr;
 }

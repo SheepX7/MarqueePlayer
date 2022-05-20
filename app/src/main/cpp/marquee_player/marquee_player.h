@@ -1,5 +1,7 @@
 #include <string>
 #include <stdlib.h>
+#include <jni.h>
+
 extern "C" {
 #include <libavcodec/avfft.h>
 #include "libavcodec/packet.h"
@@ -10,16 +12,18 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include "libavutil/time.h"
 #include "libavutil/avstring.h"
-#include "libavcodec/avcodec.h"
 }
 #include "sdl/sdl_thread.h"
 #include "sdl/sdl_mutex.h"
 #include "sdl/marquee_sdl.h"
+#include "sdl/sdl_audiospec.h"
 
 
 
 #define FRAME_QUEUE_SIZE 16
 #define SAMPLE_ARRAY_SIZE (8 * 65536)
+#define SDL_AUDIO_MIN_BUFFER_SIZE 512
+#define SDL_AUDIO_MAX_CALLBACKS_PER_SEC 30
 using namespace uranus::sdl;
 
 namespace uranus {
@@ -104,6 +108,16 @@ namespace uranus {
             AV_SYNC_AUDIO_MASTER, /* default choice */
             AV_SYNC_VIDEO_MASTER,
             AV_SYNC_EXTERNAL_CLOCK, /* synchronize to an external clock */
+        };
+
+        class AudioParams {
+        public:
+            int freq;
+            int channels;
+            int64_t channel_layout;
+            enum AVSampleFormat fmt;
+            int frame_size;
+            int bytes_per_sec;
         };
 
         class VideoState {
@@ -206,6 +220,8 @@ namespace uranus {
             int last_video_stream, last_audio_stream, last_subtitle_stream;
 
             SDL_cond *continue_read_thread;
+            AudioParams audio_src;
+            AudioParams audio_tgt;
         };
 
         class FFPlayer {
@@ -248,11 +264,14 @@ namespace uranus {
             const char* wanted_stream_spec[AVMEDIA_TYPE_NB] = {0};
 
             bool fast;
+            int audio_dev;
         };
 
         class MarqueePlayer {
             public:
                 FFPlayer  *ffPlayer;
+
+            void open(const char *pJstring);
         };
     }
 }

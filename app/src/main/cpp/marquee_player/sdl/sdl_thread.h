@@ -9,7 +9,8 @@ namespace uranus {
             pthread_t id;
             int (*fn)(void *);
             int retVal;
-            char *name;
+            char name[32];
+            void *data;
         };
 
         SDL_Thread* SDL_CreateThread(SDL_Thread *thread, int (*fn)(void*), void *data, const char *name);

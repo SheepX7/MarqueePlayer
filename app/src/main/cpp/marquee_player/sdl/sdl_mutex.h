@@ -19,7 +19,6 @@ namespace uranus {
         class SDL_cond {
         public:
             pthread_cond_t id;
-
         };
 
         SDL_cond   *SDL_CreateCond(void);
